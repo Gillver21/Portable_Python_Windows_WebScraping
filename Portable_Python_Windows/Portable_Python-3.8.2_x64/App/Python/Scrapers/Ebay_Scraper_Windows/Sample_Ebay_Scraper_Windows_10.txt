@@ -1,0 +1,221 @@
+#DEPENDENCIES
+#requests>=2.22.0
+
+import codecs
+import datetime
+import os
+import re
+import requests
+import time
+
+#CREATE DESIRED DIRECTORIES AND FILE PATHS ON WINDOWS
+os.system('mkdir .\\Ebay_Results')
+os.system('mkdir .\\Ebay_Template_CSV')
+os.system('mkdir .\\Page_Responses')
+date_append_to_ebay_file = str(datetime.datetime.now())[:19].replace(' ', '__').replace(':', 'h', 1).replace(':', 'm', 2)+'s'
+ebay_results_file = '.\\Ebay_Results\\Ebay_Results----'+date_append_to_ebay_file+'.csv'
+os.system('copy /y .\\Ebay_Template_CSV\\Ebay_Template.csv '+ebay_results_file)
+
+#EBAY URL TEMPLATES TO COLLECT FROM
+base_url = 'https://www.ebay.com'
+list_of_desired_extensions_or_categories = ['/e/home-garden/recliner-clearance', '/e/home-garden/sofa-clearance']
+extension_for_usr_profile = '/usr/'
+extension_for_user_feedback_page = '/fdbk/feedback_profile/'
+extra_description_page_template = 'https://vi.vipr.ebaydesc.com/ws/eBayISAPI.dll?ViewItemDescv4&item='
+
+#REGEXES TO FIND DESIRED VALUES
+regex_to_siphon_individual_item_details = '(?i)<div[\s]*class=s-item__image-wrapper>[\S\s]*?var=[\d]{8,}>(?=<div[\s]*class=s-item)'
+regex_to_find_item_title_1 = '(?i)<h3[\s]*class=s-item__title>([\S\s]*?)</h3>'
+regex_to_find_item_title_2 = '(?i)alt="([\S\s]*?)"'
+regex_to_find_item_price_1 = '(?i)<span[\s]*class=s-item__price>\$([\d\,\.]+)</span>'
+regex_to_find_item_price_2 = '(?i)class=s-item__price>\$([\d\,\.]+)'
+regex_to_find_item_url = '(?i)class=s-item__link href=(https://www.ebay.com/itm/[\d]*)'
+regex_to_find_ebay_item_number = '(?i)https://www.ebay.com/itm/([\d]*)'
+regex_to_find_seller = '(?i)&seller=([\S]*?)&'
+regex_to_find_feedback_profile_link = '(?i)<!--F/--><a[\s]*href=(https://www.ebay.com/fdbk/feedback_profile/[\S]*?)\?filter'
+regex_to_find_condition = '(?i)<div[\s]*class=d-item-condition-label><!--F#0--><!--F#f_1--><!--F#1\[0\]--><span[\s]*class=ux-textspans><!--F#f_7\[0\]-->Condition:[\S\s]{,350}?<!--F#f_7\[0\]-->([\S\s]*?)<'
+regex_to_find_brand = '(?i)<!--F#f_7\[0\]-->Brand:[\S\s]{,350}?<!--F#f_7\[0\]-->([\S\s]*?)<'
+regex_to_find_color = '(?i)<!--F#f_7\[0\]-->Color:[\S\s]{,350}?<!--F#f_7\[0\]-->([\S\s]*?)<'
+regex_to_find_quantity_available = '(?i)<span[\s]*id="qtySubTxt">[\s]*<span class="">[\s]*([\d]*)[\s]*available</span>[\s]*</span>'
+regex_to_isolate_boxed_description_strings_from_item_url_1 = '(?i)(<div[\s]*class="nonActPanel[\s]*">[\S\s]*?<!--vim/--></div>)[\S\s]*?(<div><!--vim#ABOUT_THIS_ITEM0-0-->[\S\s]*?<!--vim/--></div>)'
+regex_to_isolate_boxed_description_strings_from_item_url_2 = '(?i)(<div><!--vim#ABOUT_THIS_ITEM0-0-->[\S\s]*?<!--vim/--></div>)'
+regex_to_isolate_description_elements_from_boxed_description_strings = '(?i)(?:<div><!--F#0--><!--F#f_1--><!--F#1\[0\]--><span[\s]*class=ux-textspans><!--F#f_7\[0\]-->|<div><span[\s]*class=ux-expandable-textual-display-block-inline><span[\s]*data-testid=text><!--F#0--><!--F#f_1--><!--F#1\[0\]--><span[\s]*class=ux-textspans><!--F#f_7\[0\]-->)([\S\s]*?)<'
+regex_to_eliminate_bubble_description_from_description = '(?i)(?:(New|Used)):[\S\s]*'
+price_threshold = 0
+use_curl_or_requests = 2
+time_sleep_interval = 6
+
+
+def use_regex_to_findall_occurences_of_query(regex_pattern, string_to_parse):
+	found_items_from_string = re.findall(regex_pattern, string_to_parse)
+	return found_items_from_string
+
+def use_regex_to_return_single_string(regex_pattern, string_to_parse, is_this_serial_or_vin=0):
+	try:
+		single_result_string = use_regex_to_findall_occurences_of_query(regex_pattern, string_to_parse)[0]
+	except:
+		single_result_string = 'UNKNOWN'
+	return single_result_string
+
+
+def grab_page_as_string(link_to_page, sleep_interval=time_sleep_interval):
+	time.sleep(sleep_interval)
+	page_response_string = '\nUNABLE TO GRAB RESPONSE STRING FROM %s' % link_to_page
+	#GRAB PAGE DEPENDING ON IF YOU WANT TO USE THE REQUESTS LIBRARY OR CURL IN THE CLI
+	if use_curl_or_requests == 2:
+		try:
+			page_response_string = requests.get(link_to_page, timeout=20).text
+		except:
+			#RETRY AFTER 40 SECONDS AFTER INITIAL FAILURE
+			time.sleep(40)
+			try:
+				page_response_string = requests.get(link_to_page, timeout=20).text
+			except:
+				pass
+	if use_curl_or_requests == 1:
+		os.system('curl "'+link_to_page+'" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0" -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" -H "Accept-Language: en-US,en;q=0.5" -H "Connection: keep-alive" -H "Upgrade-Insecure-Requests: 1" -H "Sec-Fetch-Dest: document" -H "Sec-Fetch-Mode: navigate" -H "Sec-Fetch-Site: none" -H "Sec-Fetch-User: ?1" -H "TE: trailers" > .\\Page_Responses\\ebay_response_file.txt')
+		try:
+			time.sleep(.5)
+			page_response_string = codecs.open('./Page_Responses/ebay_response_file.txt', 'r', encoding='ascii', errors='ignore').read()
+		except:
+			pass
+	return page_response_string
+
+
+def return_sanitized_field_value_or_empty_string(value, is_this_a_number=0):
+	#FORMAT STRING TO ELEIMINATE COMMAS WITHIN CSV AND RETURN LEGITIMATE INTEGERS OR FLOATS
+	try:
+		if value != 'UNKNOWN' and is_this_a_number <= 0:
+			value = re.sub('[\r\n\t]+', '', value)
+			value = value.replace('&quot;', '"').replace('&nbsp;', ' ').replace('\r', '').replace('\n', ' ').replace('\t', ' ').replace(',', '')
+			value = re.sub('[\s\ ]{3,}', ' ', value)
+			if value[0] == '"':
+				value = value.replace('"', '\\"', 1)
+		elif value != 'UNKNOWN' and is_this_a_number == 1:
+			value = value.replace(',', '')
+		else:
+			value = ''
+	except:
+		value = value
+	return value
+
+
+def write_item_details_csv(fields, title):
+	print('\ntitle:')
+	print(title)
+	ebay_results_file_write = open(ebay_results_file, 'a', encoding='utf-8')
+	for i in range(len(fields)):
+		if fields[i] == 'UNKNOWN':
+			fields[i] = ''
+		ebay_results_file_write.write(str(fields[i]).replace('<br>', ' ').replace('<br />', ' ').replace('\\r', ' ').replace('\\n', ' ').replace(',', ''))
+		if i < len(fields)-1:
+			ebay_results_file_write.write(',')
+		else:
+			ebay_results_file_write.write('\n')
+	print('\n#SLEEPING HERE FOR 3 SECONDS - ENABLE FILE TO CLOSE')
+	print('\n---------------------------------------')
+	time.sleep(3)
+
+
+def grab_item_details(list_of_desired_extensions_or_categories):
+	for extension_category_link in list_of_desired_extensions_or_categories:
+		#VISIT DESIRED URL CATEGORIES TO COLLECT ITEMS
+		category_url = base_url+extension_category_link
+		print('\n#SLEEPING HERE FOR %s SECONDS - SENDING REQUEST TO BASE RESULTS PAGE' % str(time_sleep_interval))
+		print(category_url)
+		category_url_response = grab_page_as_string(category_url)
+		individual_item_details_array = use_regex_to_findall_occurences_of_query(regex_to_siphon_individual_item_details, category_url_response)
+		for i in range(len(individual_item_details_array)):
+			fields = ['']*12
+			#ITEM_TITLE
+			item_title = use_regex_to_return_single_string(regex_to_find_item_title_1, individual_item_details_array[i])
+			if item_title == 'UNKNOWN':
+				item_title = use_regex_to_return_single_string(regex_to_find_item_title_2, individual_item_details_array[i])
+			item_title = return_sanitized_field_value_or_empty_string(item_title)
+			fields[0] = item_title
+
+			#PRICE
+			price = use_regex_to_return_single_string(regex_to_find_item_price_1, individual_item_details_array[i])
+			if price == 'UNKNOWN':
+				price = use_regex_to_return_single_string(regex_to_find_item_price_2, individual_item_details_array[i])
+			price = return_sanitized_field_value_or_empty_string(price, 1)
+			fields[1] = price
+
+			#ITEM_URL
+			item_url = use_regex_to_return_single_string(regex_to_find_item_url, individual_item_details_array[i])
+			fields[2] = item_url
+
+			print('\nITEM_URL:')
+			print(item_url)
+
+			#EBAY_ITEM_NUMBER
+			ebay_item_number = use_regex_to_return_single_string(regex_to_find_ebay_item_number, item_url)
+
+			if float(price) >= price_threshold:
+				item_url_response = ''
+				print('\n#SLEEPING HERE FOR %s SECONDS - SENDING REQUEST TO ITEM_URL BECAUSE ITEM PRICE EXCEEDED PRICE_THRESHOLD' % str(time_sleep_interval))
+				print(item_url)
+				print('\nPRICE_THRESHOLD:')
+				print(price_threshold)
+				print('\nITEM_PRICE:')
+				print(price)
+				item_url_response = grab_page_as_string(item_url)
+
+				#SELLER
+				seller = use_regex_to_return_single_string(regex_to_find_seller, item_url_response)
+				seller = return_sanitized_field_value_or_empty_string(seller)
+				fields[3] = seller
+
+				#SELLER_PROFILE_LINK
+				seller_profile_link = base_url+extension_for_usr_profile+seller
+				fields[4] = seller_profile_link
+				
+				#SELLER_FEEDBACK_AND_RATING_LINK
+				seller_feedback_and_rating_link = base_url+extension_for_user_feedback_page+seller
+				fields[5] = seller_feedback_and_rating_link
+
+				#CONDITION
+				condition = use_regex_to_return_single_string(regex_to_find_condition, item_url_response)
+				condition = return_sanitized_field_value_or_empty_string(condition)
+				fields[6] = condition
+				
+				#BRAND
+				brand = use_regex_to_return_single_string(regex_to_find_brand, item_url_response)
+				brand = return_sanitized_field_value_or_empty_string(brand)
+				fields[7] = brand
+
+				#COLOR
+				color = use_regex_to_return_single_string(regex_to_find_color, item_url_response)
+				color = return_sanitized_field_value_or_empty_string(color)
+				fields[8] = color
+
+				#QUANTITY_AVAILABLE
+				quantity_available = use_regex_to_return_single_string(regex_to_find_quantity_available, item_url_response)
+				quantity_available = return_sanitized_field_value_or_empty_string(quantity_available, 1)
+				fields[9] = quantity_available
+
+				#DESCRIPTION
+				description = ''
+				description_elem_array_init = use_regex_to_findall_occurences_of_query(regex_to_isolate_boxed_description_strings_from_item_url_1, item_url_response)
+				if description_elem_array_init == []:
+					description_elem_array_init = use_regex_to_findall_occurences_of_query(regex_to_isolate_boxed_description_strings_from_item_url_2, item_url_response)
+				description_elem_array = use_regex_to_findall_occurences_of_query(regex_to_isolate_description_elements_from_boxed_description_strings, str(description_elem_array_init))
+				for ii in range(len(description_elem_array)):
+					if ii%2 == 0:
+						description += re.sub(regex_to_eliminate_bubble_description_from_description, '\\1', description_elem_array[ii])+' '
+					if ii%2 == 1:
+						description += re.sub(regex_to_eliminate_bubble_description_from_description, '\\1', description_elem_array[ii])+' | '
+				description = return_sanitized_field_value_or_empty_string(description)
+				fields[10] = description
+
+				#EXTRA_ITEM_DESCRIPTION_LINK
+				extra_description_link = extra_description_page_template+ebay_item_number
+				fields[11] = extra_description_link
+
+			write_item_details_csv(fields, item_title)
+
+
+print('\n...STARTING COLLECTION OF EBAY ITEMS:')
+grab_item_details(list_of_desired_extensions_or_categories)
+os.system('start '+ebay_results_file)
+print('\nEND OF EBAY SCRIPT')
